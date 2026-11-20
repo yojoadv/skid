@@ -1,1 +1,170 @@
-Hi
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tin nhắn</title>
+<style>
+  :root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+    --bg:#f5f6f8;--card:#fff;--text:#16181d;--muted:#6b7280;--line:#dfe2e8;--accent:#3b6cf6;--onaccent:#fff;color-scheme:light}
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --bg:#0f1115;--card:#181b21;--text:#e8e8ea;--muted:#8a8f9a;--line:#2a2e37;--accent:#4f7cff;color-scheme:dark}}
+  :root[data-theme="dark"]{--bg:#0f1115;--card:#181b21;--text:#e8e8ea;--muted:#8a8f9a;--line:#2a2e37;--accent:#4f7cff;color-scheme:dark}
+  *,*::before,*::after{box-sizing:border-box}
+  html{scroll-padding-top:env(safe-area-inset-top,0px)}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:16px}
+  .wrap{max-width:640px;margin:0 auto}
+  h1{font-size:22px;margin:4px 0 12px}
+  input,textarea,button{width:100%;font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;padding:10px;margin-top:8px}
+  textarea{resize:vertical}
+  button{background:var(--accent);color:var(--onaccent);border:0;font-weight:600;cursor:pointer}
+  button:disabled{opacity:.6}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:14px}
+  .name{font-weight:600}.time{color:var(--muted);font-size:12px;margin-left:6px}
+  .txt{white-space:pre-wrap;word-break:break-word;margin-top:6px}
+  .reply{margin:10px 0 0 10px;padding-left:10px;border-left:2px solid var(--accent)}
+  .nav{margin:0 0 8px}.nav a{color:var(--accent);cursor:pointer;text-decoration:none}
+  .muted{color:var(--muted)}
+  .err{color:#d93025;margin-top:8px;font-size:14px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <section id="home">
+    <h1>Gửi tin nhắn</h1>
+    <form id="sendForm" autocomplete="off">
+      <input id="sName" placeholder="Tên của bạn" maxlength="40" required>
+      <textarea id="sText" rows="5" placeholder="Nhập tin nhắn..." maxlength="1000" required></textarea>
+      <button id="sBtn" type="submit">Gửi</button>
+    </form>
+    <div class="err" id="sErr" hidden></div>
+    <p class="nav"><a href="#message">Xem tất cả tin nhắn →</a></p>
+  </section>
+
+  <section id="message" hidden>
+    <p class="nav"><a href="#">← Gửi tin mới</a></p>
+    <h1>Tin nhắn</h1>
+    <div id="status" class="muted">Đang tải...</div>
+    <div id="list"></div>
+  </section>
+
+</div>
+
+<script>
+(function () {
+  var db = null, msgs = [], replies = [], loaded = false;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function fmt(ts) {
+    try { return new Date(ts).toLocaleString("vi-VN", {hour12:false, day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit"}); }
+    catch (e) { return ""; }
+  }
+
+  function route() {
+    var isMsg = location.hash === "#message";
+    $("home").hidden = isMsg;
+    $("message").hidden = !isMsg;
+  }
+  window.addEventListener("hashchange", route);
+  route();
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function render() {
+    var list = $("list");
+    // giữ lại nội dung đang gõ trong các ô trả lời
+    var drafts = {};
+    list.querySelectorAll("form").forEach(function (f) {
+      drafts[f.dataset.id] = {n: f.querySelector("input").value, t: f.querySelector("textarea").value};
+    });
+    list.textContent = "";
+    if (!db) { $("status").textContent = "Không kết nối được kho dữ liệu. Hãy đăng nhập claude.ai rồi mở lại."; return; }
+    if (!loaded) return;
+    $("status").hidden = msgs.length > 0;
+    if (!msgs.length) $("status").textContent = "Chưa có tin nhắn nào.";
+
+    var byMsg = {};
+    replies.forEach(function (r) { (byMsg[r.mid] = byMsg[r.mid] || []).push(r); });
+
+    msgs.forEach(function (m) {
+      var card = el("div", "card");
+      var head = el("div");
+      head.appendChild(el("span", "name", m.name));
+      head.appendChild(el("span", "time", fmt(m.ts)));
+      card.appendChild(head);
+      card.appendChild(el("div", "txt", m.text));
+
+      (byMsg[m.id] || []).sort(function (a, b) { return a.ts - b.ts; }).forEach(function (r) {
+        var rb = el("div", "reply");
+        var rh = el("div");
+        rh.appendChild(el("span", "name", r.name));
+        rh.appendChild(el("span", "time", fmt(r.ts)));
+        rb.appendChild(rh);
+        rb.appendChild(el("div", "txt", r.text));
+        card.appendChild(rb);
+      });
+
+      var f = el("form"); f.dataset.id = m.id; f.autocomplete = "off";
+      var n = el("input"); n.placeholder = "Tên của bạn"; n.maxLength = 40; n.required = true;
+      var t = el("textarea"); t.rows = 2; t.placeholder = "Trả lời..."; t.maxLength = 1000; t.required = true;
+      var b = el("button", null, "Trả lời"); b.type = "submit";
+      var er = el("div", "err"); er.hidden = true;
+      var d = drafts[m.id];
+      if (d) { n.value = d.n; t.value = d.t; }
+      else { try { n.value = sessionStorage.getItem("ten") || ""; } catch (e) {} }
+      f.append(n, t, b, er);
+      f.addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        var name = n.value.trim(), text = t.value.trim();
+        if (!name || !text) return;
+        b.disabled = true; er.hidden = true;
+        try { sessionStorage.setItem("ten", name); } catch (e) {}
+        db.collection("replies").add({mid: m.id, name: name, text: text, ts: Date.now()})
+          .then(function () { t.value = ""; b.disabled = false; })
+          .catch(function () { er.textContent = "Không gửi được. Bạn có thể chưa có quyền ghi."; er.hidden = false; b.disabled = false; });
+      });
+      card.appendChild(f);
+      list.appendChild(card);
+    });
+  }
+
+  $("sendForm").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    if (!db) return;
+    var name = $("sName").value.trim(), text = $("sText").value.trim();
+    if (!name || !text) return;
+    var btn = $("sBtn"); btn.disabled = true; $("sErr").hidden = true;
+    try { sessionStorage.setItem("ten", name); } catch (e) {}
+    db.collection("messages").add({name: name, text: text, ts: Date.now()})
+      .then(function () { $("sText").value = ""; btn.disabled = false; location.hash = "message"; })
+      .catch(function () { $("sErr").textContent = "Không gửi được. Bạn có thể chưa có quyền ghi."; $("sErr").hidden = false; btn.disabled = false; });
+  });
+
+  try { $("sName").value = sessionStorage.getItem("ten") || ""; } catch (e) {}
+
+  var timer = setTimeout(function () { if (!loaded) $("status").textContent = "Chưa kết nối được dữ liệu, có thể đang chậm."; }, 10000);
+
+  claude.use("db").then(function (d) {
+    db = d;
+    if (!db) { clearTimeout(timer); render(); return; }
+    db.collection("messages").orderBy("ts", "desc").limit(200).onSnapshot(function (snap) {
+      msgs = snap.docs.map(function (x) { var v = x.data(); v.id = x.id; return v; });
+      loaded = true; clearTimeout(timer); render();
+    }, function () { $("status").textContent = "Lỗi tải dữ liệu."; });
+    db.collection("replies").orderBy("ts", "asc").limit(1000).onSnapshot(function (snap) {
+      replies = snap.docs.map(function (x) { var v = x.data(); v.id = x.id; return v; });
+      render();
+    }, function () {});
+  }).catch(function () { render(); });
+})();
+</script>
+</body>
+</html>
